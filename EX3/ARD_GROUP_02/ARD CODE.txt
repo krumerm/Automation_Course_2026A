@@ -1,0 +1,214 @@
+#include <SPI.h>
+#include <MFRC522.h>
+#include <Wire.h>
+#include <LiquidCrystal_I2C.h>
+#include <Servo.h>
+#include <SoftwareSerial.h>
+#include <Adafruit_Fingerprint.h>
+
+// --- הגדרת פינים ---
+#define RST_PIN 9
+#define SS_PIN 10
+#define BUTTON_PIN 7
+#define SERVO_PIN 3
+#define MOTION_PIN 2
+#define LED_PIN 6
+
+// פינים לטביעת אצבע
+SoftwareSerial mySerial(4, 5);
+
+// אובייקטים 
+MFRC522 mfrc522(SS_PIN, RST_PIN);
+LiquidCrystal_I2C lcd(0x27, 16, 2);
+Servo myServo;
+Adafruit_Fingerprint finger = Adafruit_Fingerprint(&mySerial);
+
+// משתנים לוגיים 
+bool isUnlocked = false;
+bool motorWasRun = false;
+
+void setup() {
+  Serial.begin(9600); // אתחול התקשורת ל-Serial Monitor
+  SPI.begin();
+  mfrc522.PCD_Init();
+  finger.begin(57600);
+  
+  myServo.attach(SERVO_PIN);
+  myServo.write(90); 
+
+  pinMode(BUTTON_PIN, INPUT_PULLUP);
+  pinMode(MOTION_PIN, INPUT);
+  pinMode(LED_PIN, OUTPUT);
+
+  lcd.init();
+  lcd.backlight();
+  
+  showLockedMessage();
+  
+  // הדפסה ראשונית: המערכת עלתה ומוכנה
+  Serial.println(F("System Initialized & Locked. Waiting for user input..."));
+}
+
+void loop() {
+  // ====================================================
+  // שלב 1: המתנה לזיהוי (RFID או טביעת אצבע)
+  // ====================================================
+  if (!isUnlocked) {
+    
+    // בדיקת RFID
+    if (mfrc522.PICC_IsNewCardPresent() && mfrc522.PICC_ReadCardSerial()) {
+      // הדפסה: זוהה כרטיס
+      Serial.println(F("RFID Detected - Access Granted"));
+      
+      unlockSystem();
+      mfrc522.PICC_HaltA();
+      mfrc522.PCD_StopCrypto1();
+    }
+
+    // בדיקת טביעת אצבע
+    int fingerResult = getFingerprintID();
+    
+    if (fingerResult >= 0) { // נמצאה התאמה
+      // הדפסה: זוהתה אצבע תקינה + מזהה
+      Serial.print(F("Fingerprint Match Found! ID: "));
+      Serial.println(fingerResult);
+      
+      unlockSystem();
+    } 
+    else if (fingerResult == -2) { // זוהתה אצבע לא מוכרת
+       // הדפסה: אצבע לא מוכרת
+       Serial.println(F("Access Denied - Unknown Fingerprint scanned"));
+
+       lcd.clear();
+       lcd.setCursor(0, 0);
+       lcd.print("FINGER UNKNOWN");
+       lcd.setCursor(0, 1);
+       lcd.print("TRY AGAIN...");
+       delay(3000);
+       showLockedMessage();
+    }
+  }
+
+  // ====================================================
+  // שלב 2: מערכת פתוחה - כפתור ומנוע
+  // ====================================================
+  if (isUnlocked && !motorWasRun) {
+    if (digitalRead(BUTTON_PIN) == LOW) {
+      // הדפסה: הכפתור נלחץ והמנוע מתחיל לזוז
+      Serial.println(F("Button Pressed -> Motor Moving (0 degrees)..."));
+
+      lcd.clear();
+      lcd.print("Motor Running...");
+      
+      myServo.write(0);
+      delay(5000);
+      
+      myServo.write(90);
+      motorWasRun = true;
+      
+      // הדפסה: המנוע סיים
+      Serial.println(F("Motor Finished. Waiting for Motion Sensor..."));
+
+      lcd.clear();
+      lcd.print("READY FOR SENSOR");
+      delay(2000);
+    }
+  }
+
+  // ====================================================
+  // שלב 3: חיישן תנועה - סיום עם קרדיטים
+  // ====================================================
+  if (motorWasRun && digitalRead(MOTION_PIN) == HIGH) {
+    // הדפסה: זוהתה תנועה
+    Serial.println(F("Motion Detected -> Starting Light Show & Credits sequence"));
+
+    // 1. הבהובים ראשוניים
+    for (int i = 0; i < 5; i++) {
+      lcd.clear();
+      lcd.setCursor(0, 0);
+      lcd.print("SENSOR ACTIVATED");
+      digitalWrite(LED_PIN, HIGH);
+      delay(500);
+      
+      lcd.clear();
+      lcd.setCursor(0, 1);
+      lcd.print("LIGHTS ON LET'S GO");
+      digitalWrite(LED_PIN, LOW);
+      delay(500);
+    }
+    digitalWrite(LED_PIN, LOW); // וידוא כיבוי
+
+    // 2. הצגת השמות (חצי שניה כל אחד)
+    lcd.clear(); lcd.setCursor(0, 0); lcd.print("ROMI"); delay(500);
+    lcd.clear(); lcd.setCursor(0, 1); lcd.print("MOR"); delay(500);
+    lcd.clear(); lcd.setCursor(0, 0); lcd.print("HADAR"); delay(500);
+    lcd.clear(); lcd.setCursor(0, 1); lcd.print("ALMOG"); delay(500);
+    
+    lcd.clear(); lcd.setCursor(0, 0); lcd.print("KEREN ?"); delay(500);
+    lcd.clear(); lcd.setCursor(0, 1); lcd.print("KEREN !"); delay(500);
+    lcd.clear(); lcd.setCursor(0, 0); lcd.print("What?"); delay(500);
+    lcd.clear(); lcd.setCursor(0, 1); lcd.print("KEREN !!"); delay(500);
+
+    // 3. סיום חגיגי
+    lcd.clear();
+    lcd.setCursor(0, 0);
+    lcd.print("AUTOMATION...");
+    delay(2000); 
+
+    lcd.setCursor(0, 1);
+    lcd.print("BEST COURSE!");
+    delay(5000); 
+
+    // 4. איפוס המערכת
+    // הדפסה: איפוס המערכת להתחלה
+    Serial.println(F("Sequence Complete. Resetting System..."));
+
+    isUnlocked = false;
+    motorWasRun = false;
+    showLockedMessage();
+  }
+}
+
+// --- פונקציות עזר ---
+
+void showLockedMessage() {
+  lcd.clear();
+  lcd.setCursor(0, 0);
+  lcd.print("SYSTEM LOCKED");
+  lcd.setCursor(0, 1);
+  lcd.print("SCAN CARD/FINGER");
+}
+
+void unlockSystem() {
+  lcd.clear();
+  lcd.setCursor(0, 0);
+  lcd.print("ROOM UNLOCKED");
+  lcd.setCursor(0, 1);
+  lcd.print("WELCOME KEREN"); // ניתן לשנות לשם המשתמש הרצוי
+  
+  isUnlocked = true;
+  delay(2000);
+  
+  lcd.clear();
+  lcd.print("PRESS BUTTON");
+}
+
+int getFingerprintID() {
+  uint8_t p = finger.getImage();
+  if (p != FINGERPRINT_OK) return -1;
+
+  p = finger.image2Tz();
+  if (p != FINGERPRINT_OK) return -1;
+
+  p = finger.fingerFastSearch();
+  if (p == FINGERPRINT_OK) {
+    return finger.fingerID;
+  } else {
+    return -2;
+  }
+}
+
+
+
+
+

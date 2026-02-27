@@ -1,0 +1,294 @@
+import java.util.Scanner;
+
+
+
+public class BaseConvertor {
+
+
+
+    public static String decimalToBinary(String s) {
+
+        if (s == null) return "Not a Decimal Number";
+
+        s = s.trim();
+
+        if (s.isEmpty()) return "Not a Decimal Number";
+
+        if (s.startsWith("-")) return "יש להזין מספר חיובי בלבד";
+
+
+
+        if (!DecCheck(s)) return "Not a Decimal Number";
+
+
+
+        double d = Double.parseDouble(s);
+
+        int integerPart = (int) d;                 // חלק שלם
+
+        double fractionalPart = d - integerPart;   // חלק שברי
+
+
+
+        int[] binaryNum = new int[1000];
+
+        int i = 0;
+
+
+
+        if (integerPart == 0) {
+
+            binaryNum[i++] = 0;
+
+        } else {
+
+            while (integerPart > 0) {
+
+                binaryNum[i] = (int) (integerPart % 2);
+
+                integerPart /= 2;
+
+                i++;
+
+            }
+
+        }
+
+
+
+        String result = "";
+
+        for (int j = i - 1; j >= 0; j--) result += binaryNum[j];
+
+
+
+        if (fractionalPart > 0) {
+
+            result += ".";
+
+            for (int k = 0; k < 20; k++) {         // עד 20 ספרות
+
+                fractionalPart *= 2;
+
+                int bit = (int) fractionalPart;
+
+                result += bit;
+
+                fractionalPart -= bit;
+
+                if (fractionalPart < 1e-12) break; // סף עצירה
+
+            }
+
+        }
+
+        return result;
+
+    }
+
+
+
+    public static boolean DecCheck(String s) {     // בדיקת עשרוני חיובי
+
+        int dotCount = 0;
+
+        for (int i = 0; i < s.length(); i++) {
+
+            char c = s.charAt(i);
+
+            if (c == '-') return false;            // אין מינוס
+
+            else if (c == '.') {
+
+                dotCount++;
+
+                if (dotCount > 1) return false;
+
+            } else if (c < '0' || c > '9') return false;
+
+        }
+
+        return true;
+
+    }
+
+
+
+    public static String binaryToDecimal(String b) {
+
+        if (b == null) return "Not a Binary Number";
+
+        b = b.trim();
+
+        if (b.isEmpty()) return "Not a Binary Number";
+
+        if (b.startsWith("-")) return "יש להזין מספר בינארי חיובי בלבד";
+
+
+
+        if (!BinCheck(b)) return "Not a Binary Number";
+
+
+
+        int dotIndex = b.indexOf('.');
+
+        double ans = 0.0;
+
+
+
+        if (dotIndex == -1) {                      // שלם
+
+            int p = 0;
+
+            for (int i = b.length() - 1; i >= 0; i--) {
+
+                if (b.charAt(i) == '1') ans += Math.pow(2, p);
+
+                p++;
+
+            }
+
+        } else {                                   // עם נקודה
+
+            int p = 0;
+
+            for (int i = dotIndex - 1; i >= 0; i--) {
+
+                if (b.charAt(i) == '1') ans += Math.pow(2, p);
+
+                p++;
+
+            }
+
+            double fracPow = 0.5;
+
+            for (int i = dotIndex + 1; i < b.length(); i++) {
+
+                if (b.charAt(i) == '1') ans += fracPow;
+
+                fracPow /= 2.0;
+
+            }
+
+        }
+
+        return Double.toString(ans);
+
+    }
+
+
+
+    public static boolean BinCheck(String b) {     // בדיקת בינארי חיובי
+
+        int dotCount = 0, digitCount = 0;
+
+        for (int i = 0; i < b.length(); i++) {
+
+            char c = b.charAt(i);
+
+            if (c == '-') return false;            // אין מינוס
+
+            else if (c == '.') {
+
+                dotCount++;
+
+                if (dotCount > 1) return false;
+
+            } else if (c == '0' || c == '1') {
+
+                digitCount++;
+
+            } else return false;
+
+        }
+
+        if (digitCount == 0) return false;
+
+        if (b.equals("."))
+
+            return false;
+
+        return true;
+
+    }
+
+
+
+    public static void main(String[] args) {
+
+        Scanner scanner = new Scanner(System.in);
+
+        boolean running = true;
+
+
+
+        while (running) {
+
+            System.out.println("בחר פעולה:");
+
+            System.out.println("1 מעבר מעשרוני לבינארי");
+
+            System.out.println("2 מעבר מבינארי לעשרוני");
+
+            System.out.println("3 יציאה");
+
+
+
+            String choice = scanner.nextLine().trim();
+
+
+
+            switch (choice) {
+
+                case "1":
+
+                    System.out.print("הכנס מספר עשרוני : ");
+
+                    String dec = scanner.nextLine().trim();
+
+                    String binaryResult = decimalToBinary(dec);
+
+                    System.out.println("התוצאה בבינארי: " + binaryResult);
+
+                    break;
+
+
+
+                case "2":
+
+                    System.out.print("הכנס מספר בינארי : ");
+
+                    String bin = scanner.nextLine().trim();
+
+                    String decimalResult = binaryToDecimal(bin);
+
+                    System.out.println("התוצאה בעשרוני: " + decimalResult);
+
+                    break;
+
+
+
+                case "3":
+
+                    System.out.println("להתראות");
+
+                    scanner.close();
+
+                    running = false;
+
+                    break;
+
+
+
+                default:
+
+                    System.out.println("הכנס רק מספר בין 1 ל-3");
+
+            }
+
+        }
+
+    }
+
+}
+

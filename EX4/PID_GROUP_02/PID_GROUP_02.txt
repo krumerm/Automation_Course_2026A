@@ -1,0 +1,180 @@
+/*
+מערכת מאזנת הפוכה עם בקר PID: מקבלת זווית מהאנקודר, מחשבת שגיאה ושולחת כוח למנוע כדי ליישר את המקל.
+*/
+
+#include <Encoder.h>
+#include <math.h>
+
+// הגדרות בסיסיות של המערכת
+const bool CONTROL_INVERT = true;   // במידה וכיוון המנוע הפוך
+const float PULSES_PER_REV = 440.0f; // רזולוציית אנקודר
+const unsigned long Ts_ms = 10;      // זמן דגימה
+const float Ts_s = Ts_ms / 1000.0f; 
+const float TARGET_LIMIT_DEG = 15.0f;
+const float HARD_STOP_DEG = 90.0f;
+const int PWM_MAX = 255;
+const int MIN_PWM = 90;       
+const int PWM_DEADBAND = 10; 
+const unsigned long RUN_MAX_MS = 8000;
+
+// חיבורי אנקודר ומנוע
+#define ENCODER_A 2
+#define ENCODER_B 3
+#define MOTOR_PWM 9
+#define MOTOR_CW  10
+#define MOTOR_CCW 11
+
+Encoder enc(ENCODER_A, ENCODER_B);
+
+// משתנים לבקר PID
+float Kp = 0, Ki = 0, Kd = 0;
+float target_deg = 0;
+float integral = 0.0f;
+float prev_error = 0.0f;
+bool running = false;
+unsigned long runStartMs = 0;
+
+// המרה מטיקים לזווית
+float ticksToDeg(long ticks) {
+  return ((float)ticks * 360.0f) / PULSES_PER_REV;
+}
+
+// שליטה על מנוע לפי PWM חתום
+void motorWriteSigned(int u_pwm) {
+  int mag = abs(u_pwm);
+
+  if (mag <= PWM_DEADBAND) mag = 0;
+  if (mag > 0 && mag < MIN_PWM) mag = MIN_PWM;
+  mag = constrain(mag, 0, PWM_MAX);
+
+  if (mag == 0) {
+    digitalWrite(MOTOR_CW, LOW);
+    digitalWrite(MOTOR_CCW, LOW);
+    analogWrite(MOTOR_PWM, 0);
+    return;
+  }
+
+  if (u_pwm > 0) {
+    digitalWrite(MOTOR_CW, HIGH);
+    digitalWrite(MOTOR_CCW, LOW);
+  } else {
+    digitalWrite(MOTOR_CW., LOW);
+    digitalWrite(MOTOR_CCW, HIGH);
+  }
+
+  analogWrite(MOTOR_PWM, mag);
+}
+
+// עצירת מערכת במקרה חריג
+void stopSystem(const char* reason) {
+  motorWriteSigned(0);
+  running = false;
+  Serial.print("[STOP] ");
+  Serial.println(reason);
+}
+
+// הדפסת עזרה למשתמש
+void printHelp() {
+  Serial.println(F("--- PID UI ---"));
+  Serial.println(F("Enter: Kp Ki Kd TargetDeg"));
+  Serial.println(F("Example: 5 0 0.5 10"));
+  Serial.println(F("Commands: HELP, STOP, ZERO"));
+}
+
+// הכנה ראשונית
+void setup() {
+  Serial.begin(9600);
+  Serial.setTimeout(50);
+
+  pinMode(MOTOR_PWM, OUTPUT);
+  pinMode(MOTOR_CW, OUTPUT);
+  pinMode(MOTOR_CCW, OUTPUT);
+
+  motorWriteSigned(0);
+  enc.write(0);
+
+  Serial.println();
+  Serial.println(F("PID System Ready"));
+  printHelp();
+  Serial.println(F("CSV: t_ms,angle_deg,error_deg,u_pwm"));
+}
+
+// לולאה ראשית: קליטת פקודות + בקר PID
+void loop() {
+  // קליטת פקודות מהמשתמש (ערכי PID / עצירה / אפס)
+  if (Serial.available() > 0) {
+    char c = Serial.peek();
+    if (isAlpha(c)) {
+      String cmd = Serial.readStringUntil('\n');
+      cmd.trim();
+      if (cmd.equalsIgnoreCase("STOP")) stopSystem("User STOP");
+      else if (cmd.equalsIgnoreCase("ZERO")) {
+        enc.write(0); integral = 0; prev_error = 0;
+        Serial.println("[OK] ZERO");
+      }
+      else if (cmd.equalsIgnoreCase("HELP")) printHelp();
+    } else {
+      float nKp = Serial.parseFloat();
+      float nKi = Serial.parseFloat();
+      float nKd = Serial.parseFloat();
+      float nTarget = Serial.parseFloat();
+      while(Serial.available()) Serial.read();
+
+      if (fabs(nTarget) > TARGET_LIMIT_DEG) {
+        Serial.println("[ERROR] Target > +/-15");
+      } else {
+        Kp = nKp; Ki = nKi; Kd = nKd; target_deg = nTarget;
+        integral = 0; prev_error = 0;
+        runStartMs = millis();
+        running = true;
+        Serial.println("t_ms,angle_deg,error_deg,u_pwm");
+      }
+    }
+  }
+
+  // זמן דגימה
+  static unsigned long lastTick = 0;
+  unsigned long now = millis();
+  if (!running) return;
+  if (now - lastTick < Ts_ms) return;
+  lastTick = now;
+
+  // עצירה לאחר זמן
+  if (now - runStartMs > RUN_MAX_MS) {
+    stopSystem("TIMEOUT");
+    return;
+  }
+
+  // קריאת זווית
+  float angle_deg = ticksToDeg(-enc.read());
+  if (fabs(angle_deg) > HARD_STOP_DEG) {
+    stopSystem("HARD_STOP");
+    return;
+  }
+
+  // חישוב שגיאה PID
+  float error = target_deg - angle_deg;
+  float P_term = Kp * error;
+  integral += error * Ts_s;
+  if (Ki != 0.0f) integral = constrain(integral, -(PWM_MAX/Ki), (PWM_MAX/Ki));
+  float I_term = Ki * integral;
+  float derivative = (error - prev_error) / Ts_s;
+  float D_term = Kd * derivative;
+  float u = P_term + I_term + D_term;
+  if (CONTROL_INVERT) u = -u;
+
+  // הפקת PWM
+  int u_pwm = (int)lroundf(constrain(u, -PWM_MAX, PWM_MAX));
+  motorWriteSigned(u_pwm);
+
+  // הדפסת נתונים (לניתוח וגרפים)
+  Serial.print(now - runStartMs);
+  Serial.print(",");
+  Serial.print(angle_deg, 6);
+  Serial.print(",");
+  Serial.print(error, 6);
+  Serial.print(",");
+  Serial.println(u_pwm);
+
+  prev_error = error;
+}
